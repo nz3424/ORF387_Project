@@ -1,5 +1,7 @@
 __author__ = 'matic'
 
+# --- DATABSE PASSWORD --- #
+password = '@Pirates11U;'
 
 # --- VARIOUS CONSTANTS --- #
 currentSeason       = '15'

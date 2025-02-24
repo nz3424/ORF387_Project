@@ -1,8 +1,9 @@
 __author__ = 'matic'
 
 import time
-import pyodbc
 import traceback
+#import pyodbc
+import mysql.connector
 import networkx as nx
 from datetime import date
 from collections import deque
@@ -17,14 +18,19 @@ def connectToDB():
 
     while connection is None:
         try:
-            connection = pyodbc.connect('DSN=FootNet')
+            # connection = pyodbc.connect('DSN=FootNet')
+            connection = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password=constants.password,
+                database = "footballnetwork"
+                )
 
         except Exception as e:
             print("\n[DB connector]  Error connecting to database. Trying again in 1 sec.", e)
             traceback.print_exc()
 
         time.sleep(1)
-
     return connection
 
 
@@ -44,7 +50,7 @@ def getCountriesDict(connection):
         for resultRow in result:
             cDict[resultRow[1]] = resultRow[0]
 
-    except pyodbc.DatabaseError as e:
+    except mysql.connector.errors.DatabaseError as e:
         print("\n[Countries mapper]  ERROR - DatabaseError", e)
         pass
 
@@ -61,15 +67,15 @@ def checkIfPlayerExists(connection, playerId):
         cursor.execute('''
                         SELECT *
                         FROM player
-                        WHERE idP = ?
+                        WHERE idP = %s
                        ''',
-                       playerId)
+                       (playerId,))
 
         result = cursor.fetchall()
 
         exists = (len(result) > 0)
 
-    except pyodbc.DatabaseError as e:
+    except mysql.connector.errors.DatabaseError as e:
         print("\n[Player existence checker]  ERROR - DatabaseError\n", e)
         pass
 
@@ -96,12 +102,12 @@ def calculatePlayersCareerSums(connection):
         try:
             cursor.execute('''
                             UPDATE player
-                            SET apps=?, goals=?, assists=?, ownGoals=?, yellowCards=?, redCards=?, onSubs=?, offSubs=?, penaltyGoals=?, concededGoals=?, cleanSheets=?, minutesPerGoal=?, minutesPlayed=?
-                            WHERE idP = ?
+                            SET apps=%s, goals=%s, assists=%s, ownGoals=%s, yellowCards=%s, redCards=%s, onSubs=%s, offSubs=%s, penaltyGoals=%s, concededGoals=%s, cleanSheets=%s, minutesPerGoal=%s, minutesPlayed=%s
+                            WHERE idP = %s
                            ''',
-                           pcs[1], pcs[2], pcs[3], pcs[4], pcs[5], pcs[6], pcs[7], pcs[8], pcs[9], pcs[10], pcs[11], pcs[12], pcs[13], pcs[0])
+                           (pcs[1], pcs[2], pcs[3], pcs[4], pcs[5], pcs[6], pcs[7], pcs[8], pcs[9], pcs[10], pcs[11], pcs[12], pcs[13], pcs[0]))
 
-        except pyodbc.DatabaseError as e:
+        except mysql.connector.errors.DatabaseError as e:
             print("[Players Career Sum Calculator]  ERROR - DatabaseError", e)
             traceback.print_exc()
 
@@ -130,11 +136,11 @@ def calculateClubsSums(connection):
         try:
             cursor.execute('''
                             UPDATE club
-                            SET apps=?, goals=?, assists=?, ownGoals=?, yellowCards=?, redCards=?, onSubs=?, offSubs=?, penaltyGoals=?, concededGoals=?, cleanSheets=?, minutesPerGoal=?, minutesPlayed=?
-                            WHERE idClub = ?
+                            SET apps=%s, goals=%s, assists=%s, ownGoals=%s, yellowCards=%s, redCards=%s, onSubs=%s, offSubs=%s, penaltyGoals=%s, concededGoals=%s, cleanSheets=%s, minutesPerGoal=%s, minutesPlayed=%s
+                            WHERE idClub = %s
                            ''',
-                           pcs[1], pcs[2], pcs[3], pcs[4], pcs[5], pcs[6], pcs[7], pcs[8], pcs[9], pcs[10], pcs[11], pcs[12], pcs[13], pcs[0])
-        except pyodbc.DatabaseError as e:
+                           (pcs[1], pcs[2], pcs[3], pcs[4], pcs[5], pcs[6], pcs[7], pcs[8], pcs[9], pcs[10], pcs[11], pcs[12], pcs[13], pcs[0]))
+        except mysql.connector.errors.DatabaseError as e:
             print("[Clubs Sum Calculator]  ERROR - DatabaseError", e)
             traceback.print_exc()
 
@@ -166,7 +172,7 @@ def calculatePlayersWeight(playerId1, playerId2, playersInfo, withInflation=True
 
     for currentSeason in playersInfo[playedLessSeasons]:
         # players have common season
-        if(playersInfo[playedMoreSeasons].has_key(currentSeason)):
+        if(currentSeason in playersInfo[playedMoreSeasons]):
             # players have played in the same club in this season
             if(playersInfo[playedMoreSeasons][currentSeason][2] == playersInfo[playedLessSeasons][currentSeason][2]):
 
@@ -308,12 +314,12 @@ def createPlayerEdgeListFromDB(filename, seasons='all', leagues='all'):
     print("\n[Exporter]  Exporting player edge list")
 
     if(seasons != 'all'):
-        seasonsString = ','.join(map(str, seasons))
+        seasonsString = ','.join(seasons)
     else:
         seasonsString = constants.allSeasonsString
 
     if(leagues != 'all'):
-        leaguesString = ','.join(map(str, leagues))
+        leaguesString = ','.join(leagues)
     else:
         leaguesString = constants.allLeaguesString
 
@@ -362,7 +368,7 @@ def createPlayerEdgeListFromDB(filename, seasons='all', leagues='all'):
             seasonId         = int(playerData[1])
             currentPlayerIdx = int(playerData[0])
 
-            if(not playersInfo.has_key(currentPlayerIdx)):
+            if(currentPlayerIdx not in playersInfo):
                 playersInfo[currentPlayerIdx] = dict()
 
             playersInfo[currentPlayerIdx][seasonId] = playerData
@@ -398,16 +404,11 @@ def createPlayerEdgeListFromDB(filename, seasons='all', leagues='all'):
 
                 clubsBySeasons = cursor.fetchall()
 
-
                 # link all the players from all the clubs to the current player
-                linkedPlayerIds = list()
+                linkedPlayerIds = []
                 for clubBySeason in clubsBySeasons:
-                    cursor.execute('''
-                                    SELECT pcs.idP
-                                    FROM playerclubseason pcs
-                                    WHERE pcs.idClub = ? AND pcs.idS = ?
-                                   ''',
-                                   clubBySeason[0], clubBySeason[1])
+                    cursor.execute("SELECT pcs.idP FROM playerclubseason pcs WHERE pcs.idClub = %s AND pcs.idS = %s",
+                                   (clubBySeason[0], clubBySeason[1]))
 
                     playersInClubInSeason = cursor.fetchall()
 
@@ -468,12 +469,12 @@ def createClubEdgeListFromDB(filename, seasons='all', leagues='all',
     print("\n[Exporter]  Exporting club transfer edge list")
 
     if(seasons != 'all'):
-        seasonsString = ','.join(map(str, seasons))
+        seasonsString = ','.join(seasons)
     else:
         seasonsString = constants.allSeasonsString
 
     if(leagues != 'all'):
-        leaguesString = ','.join(map(str, leagues))
+        leaguesString = ','.join(leagues)
     else:
         leaguesString = constants.allLeaguesString
 
@@ -532,7 +533,7 @@ def createClubEdgeListFromDB(filename, seasons='all', leagues='all',
                         JOIN club c USING (idClub)
                         WHERE cs.value != -1 AND cs.idS IN (%s) AND c.idL IN (%s)
                         GROUP BY idClub
-                        ORDER BY idClub, idS
+                        ORDER BY idClub, MAX(idS)
                        ''' %
                        (seasonsString, leaguesString))
 
