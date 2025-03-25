@@ -463,7 +463,6 @@ def createPlayerEdgeListFromDB(filename, seasons='all', leagues='all'):
 
     return playerIndices, playersInfo
 
-
 def createClubEdgeListFromDB(filename, seasons='all', leagues='all',
                              weightedByClubValue=True, weightedByClubImportance=True):
     print("\n[Exporter]  Exporting club transfer edge list")
@@ -538,14 +537,13 @@ def createClubEdgeListFromDB(filename, seasons='all', leagues='all',
                        (seasonsString, leaguesString))
 
         clubValues = cursor.fetchall()
-
         for clubValue in clubValues:
+            # clubValue format: (clubID, clubValue)
             currentClubIdx = clubIndices[clubValue[0]]
             clubsInfo[currentClubIdx]['league']     = clubValue[1]
             clubsInfo[currentClubIdx]['importance'] = list()
 
             clubsInfo[currentClubIdx]['importance'].append(clubValue[2])
-
         # add club average ranking to clubsInfo
         cursor.execute('''
                         SELECT cs.idClub, AVG(cs.ranking)
@@ -560,13 +558,13 @@ def createClubEdgeListFromDB(filename, seasons='all', leagues='all',
         clubRankings = cursor.fetchall()
 
         for clubRanking in clubRankings:
+            # clubRanking format: (clubID, clubRanking)
             currentClubIdx = clubIndices[clubRanking[0]]
 
             if('importance' not in clubsInfo[currentClubIdx]):
                 clubsInfo[currentClubIdx]['importance'] = list()
 
             clubsInfo[currentClubIdx]['importance'].append(clubRanking[1])
-
         cursor.execute('''
                         SELECT pcs.idP, pcs.idClub, pcs.idS
                         FROM playerclubseason pcs
@@ -601,10 +599,21 @@ def createClubEdgeListFromDB(filename, seasons='all', leagues='all',
                         clubImportance = calculateClubWeight(clubId2, clubsInfo, weightedByClubValue)
                     else:
                         clubImportance = 1
-
                     numOfTransfers = clubTransfersOut[clubInEntry1][clubInEntry2]
 
-                    edgeList.append("%d %d %f\n" % (clubId1, clubId2, numOfTransfers * clubImportance))
+                    # Check to make sure this is right!
+                    if(weightedByClubImportance):
+                        edgeWeight =  numOfTransfers * clubImportance/1000000
+                    else:
+                        if clubRankings[clubId2-1]:
+                            if clubRankings[clubId2-1][1] > 0:
+                                edgeWeight = numOfTransfers * 1/(float(clubRankings[clubId2-1][1]) * constants.leagueRankings[clubsInfo[clubId2]['league']])
+                            else:
+                                edgeWeight = numOfTransfers * 1/(constants.noRankingPenalty * constants.leagueRankings[clubsInfo[clubId2]['league']])
+                        else:
+                            edgeWeight = numOfTransfers * 1/(constants.noRankingPenalty * constants.leagueRankings[clubsInfo[clubId2]['league']])
+
+                    edgeList.append("%d %d %f\n" % (clubId1, clubId2,edgeWeight))
                     numEdges += 1
 
         # output starting comments - number of nodes and edges, format
@@ -772,12 +781,12 @@ def calculateWeightedBetweennessCentrality(graph):
         if(node % 500 == 0):
             print("[Weighted Betweenness calculator]  Processed %d nodes" % (node))
 
-        S = list()
-        P = list()
+        S = []
+        P = []
         Q = deque()
 
-        sigma = dict()
-        d     = dict()
+        sigma = {}
+        d     = {}
 
         Q.append(node)
 
@@ -821,11 +830,11 @@ def calculateWeightedBetweennessCentrality(graph):
                     sigma[neighbor] += sigma[v]
                     P[neighbor].append(v)
 
-        delta = dict()
+        delta = {}
         for i in range(1, N):
             delta[i] = 0
 
-        while len(S) > 0:
+        while S:
             w = S.pop()
             for v in P[w]:
                 delta[v] += (sigma[v] / float(sigma[w])) * (1 + delta[w])
@@ -837,7 +846,52 @@ def calculateWeightedBetweennessCentrality(graph):
           (endTime - startTime))
 
     return cb
+# something is wrong with this
+def calculateFastWeightedBetweennessCentrality(graph):
+    """Fast Weighted Betweenness Centrality algorithm as described in Brandes 2001"""
+    N = graph.number_of_nodes() + 1
+    centralities = {i: 0 for i in range(1,N)}
+    for node in graph.nodes():
+        # initialize 
+        S, P = [], [[] for _ in range(1,N+1)]
+        sigma = {i:0 for i in range(1, N)}
+        sigma[node] = 1
+        d = {i:-1 for i in range(1,N)}
+        d[node] = 0
+        Q = deque()
+        Q.append(node)
 
+        while Q:
+            v = Q.popleft()
+            S.append(v)
+
+            for neighbor in graph.neighbors(v):
+                # get the weight of the edge between v and neighbor
+                weight = graph[v][neighbor]['weight']
+                if d[neighbor] < 0:
+                    Q.append(neighbor)
+                    if weight != 0:
+                        d[neighbor] = d[v] + (1.0/weight) 
+                    else: 
+                        d[neighbor] = d[v] + constants.noWeightPathPenalty
+
+                if(weight != 0):
+                    shortestPath = d[v] + (1.0 / weight)
+                else:
+                    shortestPath = d[v] + constants.noWeightPathPenalty
+                
+                if d[neighbor] == shortestPath:
+                    sigma[neighbor] += sigma[v]
+                    P[neighbor].append(v)
+
+        delta = {i:0 for i in range(1, N)}
+        while S:
+            w = S.pop()
+            for v in P[w]:
+                delta[v]+= (sigma[v]/float(sigma[w])) * (1+delta[w])
+            if w != node:
+                centralities[w] += delta[w]
+    return centralities
 
 def calculateBridgenessCentrality(graph):
     print("\n[Bridgeness calculator]  calculating weighted Bridgeness scores")

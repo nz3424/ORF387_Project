@@ -1,19 +1,33 @@
 import utils
+import networkx as nx
+import matplotlib.pyplot as plt
+from operator import itemgetter
 
 connection = utils.connectToDB()
-cDict = utils.getCountriesDict(connection)
-seasons = ['1', '2', '3']
-seasonsString = ','.join(seasons)
-leagues = ["1", "2", "3"]
-filename = "PlayerNet.adj"
-utils.createPlayerEdgeListFromDB(filename, seasons, leagues)
-utils.createClubEdgeListFromDB("ClubNet.adj", seasons, leagues)
-graph1, nodeData1 = utils.createWeightedGraphFromEdgeList(filename)
-graph2, nodeData2 = utils.createWeightedGraphFromEdgeList("ClubNet.adj")
+#seasons = ['1', '2', '3']
+# leagues = ["1", "2", "3"]
+filename = "ClubNet.adj"
+seasons, leagues = 'all', 'all'
 
-print(graph1)
-ranking = utils.calculatePageRank(graph1)
-print(nodeData1[max(ranking, key = ranking.get)])
+utils.createClubEdgeListFromDB(filename, weightedByClubImportance=True)
+clubGraph, nodeData = utils.createWeightedGraphFromEdgeList(filename, directed = True)
 
-ranking2 = utils.calculatePageRank(graph2)
-print(nodeData2[max(ranking2, key = ranking2.get)])
+
+
+betweenness = utils.calculateFastWeightedBetweennessCentrality(clubGraph)
+
+betweennessnx = nx.betweenness_centrality(clubGraph, weight = "reciprocal")
+betweennessnx = sorted(betweennessnx.items(), key = itemgetter(1), reverse = True)
+
+
+outputFile = "WeightedBetweenness.txt"
+file = open(outputFile, 'w')
+for i in range(1, len(betweenness)):
+    outputString = f"Node name: {nodeData[betweennessnx[i][0]]}, score: {betweennessnx[i][1]}"
+    # print(outputString)
+    file.write(outputString + '\n')
+file.close()
+
+# print("Best weighted betweeness: ", nodeData[min(WBC_ranking, key = WBC_ranking.get)])
+# print("Nick Best weighted betweeness: ", nodeData[min(betweenness, key = betweenness.get)])
+
